@@ -65,10 +65,32 @@ _DIRECT_PROMPT = ChatPromptTemplate.from_messages([
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _format_context(chunks: list[dict]) -> str:
-    """Format retrieved chunks into a readable context block."""
+def _format_context(
+    chunks: list[dict],
+    sub_queries: list[str] | None = None,
+    sub_contexts: list[list[dict]] | None = None,
+) -> str:
+    """Format retrieved chunks into a readable context block.
+
+    If sub_queries and sub_contexts are provided (multi-hop), groups chunks
+    by sub-query for clearer structure. Otherwise falls back to flat list.
+    """
     if not chunks:
         return "(Không tìm thấy điều khoản liên quan.)"
+
+    # Multi-hop: group by sub-query
+    if sub_queries and sub_contexts and len(sub_queries) > 1:
+        parts = []
+        for sq_idx, (sq, sc) in enumerate(zip(sub_queries, sub_contexts), 1):
+            parts.append(f"=== Sub-query {sq_idx}: {sq} ===")
+            for i, chunk in enumerate(sc, 1):
+                breadcrumb = chunk.get("breadcrumb", "")
+                text       = chunk.get("text", "")
+                parts.append(f"--- Nguồn {sq_idx}.{i}: {breadcrumb} ---\n{text}")
+            parts.append("")  # blank line between groups
+        return "\n\n".join(parts)
+
+    # Simple: flat list (original behavior)
     parts = []
     for i, chunk in enumerate(chunks, 1):
         breadcrumb = chunk.get("breadcrumb", "")
@@ -87,10 +109,12 @@ def generate_node(state: AgentState) -> dict:
 
     Called after the Retrieve node.
     """
-    question = state["question"]
-    context  = state.get("context", [])
+    question     = state["question"]
+    context      = state.get("context", [])
+    sub_queries  = state.get("sub_queries", [])
+    sub_contexts = state.get("sub_contexts", [])
 
-    context_text = _format_context(context)
+    context_text = _format_context(context, sub_queries, sub_contexts)
 
     llm    = _get_llm()
     chain  = _RAG_PROMPT | llm

@@ -11,8 +11,12 @@ Graph topology:
                     ┌─────────────┤─────────────────┐
                     ▼                               ▼
              ┌──────────────┐              ┌───────────────┐
-             │   Retrieve   │              │ Direct Answer │
+             │  Decompose   │              │ Direct Answer │
              └──────┬───────┘              └───────────────┘
+                    ▼
+             ┌──────────────┐
+             │   Retrieve   │  (per sub-query hybrid search)
+             └──────┬───────┘
                     ▼
              ┌──────────────┐
              │   Generate   │
@@ -35,6 +39,7 @@ from langchain_core.messages import HumanMessage
 
 from src.graph.state import AgentState
 from src.graph.nodes.router import router_node
+from src.graph.nodes.decompose import decompose_node
 from src.graph.nodes.retrieve import retrieve_node
 from src.graph.nodes.generate import generate_node, direct_answer_node
 from src.graph.nodes.grader import grader_node
@@ -72,6 +77,7 @@ def build_graph():
 
     # Register nodes
     g.add_node("router",        router_node)
+    g.add_node("decompose",     decompose_node)
     g.add_node("retrieve",      retrieve_node)
     g.add_node("generate",      generate_node)
     g.add_node("grader",        grader_node)
@@ -80,14 +86,15 @@ def build_graph():
     # Entry point
     g.set_entry_point("router")
 
-    # Router → retrieve or direct_answer
+    # Router → decompose or direct_answer
     g.add_conditional_edges(
         "router",
         _route_after_router,
-        {"retrieve": "retrieve", "direct": "direct_answer"},
+        {"retrieve": "decompose", "direct": "direct_answer"},
     )
 
-    # retrieve → generate
+    # decompose → retrieve → generate
+    g.add_edge("decompose", "retrieve")
     g.add_edge("retrieve", "generate")
 
     # generate → grader
@@ -134,6 +141,8 @@ def ask(question: str, filter_laws: list[str] | None = None) -> str:
         "needs_rewrite": False,
         "rewrite_count": 0,
         "filter_laws":   filter_laws,
+        "sub_queries":   [],
+        "sub_contexts":  [],
     }
 
     final_state = graph.invoke(initial_state)

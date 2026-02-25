@@ -114,42 +114,79 @@ def retrieve_node(state: AgentState) -> dict:
     """
     LangGraph node: hybrid retrieve (BM25 + dense) with RRF fusion.
 
+    Supports multi-hop: if sub_queries has multiple entries (from Decompose
+    node), each sub-query is retrieved independently. Results are stored
+    per-sub-query in sub_contexts, then merged into a flat context list.
+
     Parameters
     ----------
     state : AgentState
-        Must have "question" set. Optionally "filter_laws" for scoped search.
+        Must have "question" set. Uses "sub_queries" if available.
+        Optionally "filter_laws" for scoped search.
 
     Returns
     -------
-    dict  with updated "context" key — top-K fused chunks
+    dict  with updated "context", "sub_contexts" keys
     """
     question    = state["question"]
     filter_laws = state.get("filter_laws")
+    sub_queries = state.get("sub_queries", [])
 
-    # ── Dense retrieval (ChromaDB) ─────────────────────────────────────────
-    query_vec     = _get_embedder().embed_query(question)
-    dense_results = _get_store().similarity_search(
-        query_vec,
-        k=CANDIDATE_K,
-        filter_law=filter_laws,
-    )
+    # Fall back to original question if no sub-queries
+    if not sub_queries:
+        sub_queries = [question]
 
-    # ── Sparse retrieval (BM25) ────────────────────────────────────────────
-    sparse_results = _get_bm25().search(
-        question,
-        k=CANDIDATE_K,
-        filter_law=filter_laws,
-    )
+    sub_contexts: list[list[dict]] = []
+    seen_ids: set[str] = set()
+    all_fused: list[dict] = []
 
-    # ── RRF Fusion ────────────────────────────────────────────────────────
-    fused   = _rrf_fuse(dense_results, sparse_results)
-    context = fused[:TOP_K]
+    for sq_idx, sq in enumerate(sub_queries):
+        # ── Dense retrieval (ChromaDB) ─────────────────────────────────
+        query_vec     = _get_embedder().embed_query(sq)
+        dense_results = _get_store().similarity_search(
+            query_vec,
+            k=CANDIDATE_K,
+            filter_law=filter_laws,
+        )
 
-    print(f"  [Retrieve] Hybrid search: dense={len(dense_results)}, "
-          f"bm25={len(sparse_results)}, fused→top{TOP_K}")
-    for i, c in enumerate(context):
-        rrf   = c.get("rrf_score", 0)
-        bc    = c.get("breadcrumb", "")[:75]
-        print(f"    [{i+1}] rrf={rrf:.4f} | {bc}")
+        # ── Sparse retrieval (BM25) ───────────────────────────────────
+        sparse_results = _get_bm25().search(
+            sq,
+            k=CANDIDATE_K,
+            filter_law=filter_laws,
+        )
 
-    return {"context": context}
+        # ── RRF Fusion ────────────────────────────────────────────────
+        fused      = _rrf_fuse(dense_results, sparse_results)
+        top_fused  = fused[:TOP_K]
+        sub_contexts.append(top_fused)
+
+        print(f"  [Retrieve] Sub-query {sq_idx+1}/{len(sub_queries)}: "
+              f"dense={len(dense_results)}, bm25={len(sparse_results)}, "
+              f"fused→top{TOP_K}")
+        print(f"             Q: \"{sq[:70]}\"")
+        for i, c in enumerate(top_fused):
+            rrf = c.get("rrf_score", 0)
+            bc  = c.get("breadcrumb", "")[:75]
+            print(f"    [{i+1}] rrf={rrf:.4f} | {bc}")
+
+        # Collect for merged context (deduplicate by chunk_id)
+        for chunk in top_fused:
+            cid = chunk.get("chunk_id", "")
+            if cid and cid not in seen_ids:
+                seen_ids.add(cid)
+                all_fused.append(chunk)
+
+    # Sort merged results by RRF score and take overall top-K
+    all_fused.sort(key=lambda c: c.get("rrf_score", 0), reverse=True)
+    context = all_fused[:TOP_K * len(sub_queries)]
+
+    if len(sub_queries) > 1:
+        print(f"  [Retrieve] Merged {len(sub_queries)} sub-queries → "
+              f"{len(context)} unique chunks")
+
+    return {
+        "context":      context,
+        "sub_contexts": sub_contexts,
+    }
+

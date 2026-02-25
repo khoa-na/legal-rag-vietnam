@@ -90,6 +90,9 @@ _TEST_QUESTIONS = [
     ("Người lao động được nghỉ phép năm bao nhiêu ngày?", ["Bộ Luật Lao Động 2019"]),
     ("Hành vi lạm dụng vị trí thống lĩnh thị trường bị xử lý như thế nào?", ["Luật Cạnh Tranh 2018"]),
     ("Thời hạn bảo hộ quyền tác giả đối với tác phẩm văn học là bao lâu?", ["Luật Sở Hữu Trí Tuệ (sửa đổi 2025)"]),
+    # Multi-hop test cases (query decomposition)
+    ("So sánh quyền của cổ đông theo Luật Doanh Nghiệp 2020 và Luật Chứng Khoán 2019", None),
+    ("Quy định về vốn điều lệ và thủ tục đăng ký doanh nghiệp theo Luật Doanh Nghiệp 2020 là gì?", None),
 ]
 
 def run_tests() -> None:

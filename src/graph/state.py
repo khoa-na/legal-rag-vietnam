@@ -29,6 +29,10 @@ class AgentState(TypedDict):
     needs_rewrite: Flag set by Grader if the query needs to be rewritten.
     rewrite_count: Number of times the query has been rewritten (circuit-breaker).
     filter_laws  : Optional list of law names to restrict retrieval scope.
+    sub_queries  : Decomposed sub-queries for multi-hop reasoning.
+                   Empty list or single-element list for simple questions.
+    sub_contexts : Per-sub-query retrieval results (list of lists).
+                   Kept separate so Generate can group context by sub-query.
     """
     messages:      Annotated[list[BaseMessage], add_messages]
     question:      str
@@ -38,3 +42,5 @@ class AgentState(TypedDict):
     needs_rewrite: bool
     rewrite_count: int
     filter_laws:   Optional[list[str]]
+    sub_queries:   list[str]
+    sub_contexts:  list[list[dict]]
